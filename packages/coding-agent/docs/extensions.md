@@ -326,6 +326,38 @@ The built-in MCP support connects registered servers. When nothing does, because
 `ExtensionContext` provides the working directory, mode, UI, session manager, model runtime, abort signal, context usage, and controls for compaction and shutdown.
 Use `ctx.modelRegistry.streamSimple()` for provider-neutral nested model calls.
 
+### Queued messages
+
+`ctx.getQueuedMessages()` returns text-only copies of pending user steering and follow-up
+messages as `{ steering, followUp }`. `ctx.clearQueue()` clears both session queues and returns
+the removed user-message text in the same shape. Both methods work in all modes, without a
+custom editor or access to `AgentSession`.
+
+Clearing also removes attached images and custom messages queued with `deliverAs: "steer"` or
+`"followUp"`, but those are not included in the returned text. It does not abort the current
+run, undo messages already delivered, clear `nextTurn` or context-only custom messages, or
+clear the interactive TUI's separate compaction-input queue. Resending is an explicit action
+through `pi.sendUserMessage()`; the returned text cannot restore attachments.
+
+`queue_update` notifies extensions when pending user-message text is enqueued, delivered, or
+cleared. Its `steering` and `followUp` arrays are snapshots, not mutable queue handles.
+Return values are ignored, and asynchronous handlers do not delay queue operations.
+Read the current state with `ctx.getQueuedMessages()` after asynchronous work.
+
+```typescript
+pi.on("queue_update", (event) => {
+  // Publish event.steering and event.followUp to an external UI.
+});
+
+pi.registerCommand("clear-queued", {
+  description: "Remove pending steering and follow-up messages",
+  handler: async (_args, ctx) => {
+    const removed = ctx.clearQueue();
+    ctx.ui.notify(`Removed ${removed.steering.length + removed.followUp.length} queued user messages`);
+  },
+});
+```
+
 Command handlers receive `ExtensionCommandContext`, which adds operations for waiting until idle, reloading, tree navigation, and session replacement.
 These operations are command-only because calling them from lifecycle handlers can deadlock the runtime.
 

@@ -94,6 +94,7 @@ import {
 	type MessageEndEvent,
 	type MessageStartEvent,
 	type MessageUpdateEvent,
+	type QueueUpdateEvent,
 	type ReplacedSessionContext,
 	type SessionBeforeCompactResult,
 	type SessionBeforeTreeResult,
@@ -1043,11 +1044,13 @@ export class AgentSession {
 	}
 
 	private _emitQueueUpdate(): void {
-		this._emit({
+		const event: QueueUpdateEvent = {
 			type: "queue_update",
 			steering: [...this._steeringMessages],
 			followUp: [...this._followUpMessages],
-		});
+		};
+		this._emit(event);
+		void this._extensionRunner.emit(event);
 	}
 
 	private async _emitSessionCompactFailed(event: Omit<SessionCompactFailedEvent, "type">): Promise<void> {
@@ -2301,7 +2304,6 @@ export class AgentSession {
 	 */
 	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
 		this._steeringMessages.push(text);
-		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
 			content.push(...images);
@@ -2311,6 +2313,7 @@ export class AgentSession {
 			content,
 			timestamp: Date.now(),
 		});
+		this._emitQueueUpdate();
 	}
 
 	/**
@@ -2318,12 +2321,12 @@ export class AgentSession {
 	 */
 	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
 		this._followUpMessages.push(text);
-		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
 			content.push(...images);
 		}
 		this.agent.followUp({ role: "user", content, timestamp: Date.now() });
+		this._emitQueueUpdate();
 	}
 
 	/**
@@ -3507,6 +3510,11 @@ export class AgentSession {
 					void this.abort();
 				},
 				hasPendingMessages: () => this.pendingMessageCount > 0,
+				getQueuedMessages: () => ({
+					steering: [...this.getSteeringMessages()],
+					followUp: [...this.getFollowUpMessages()],
+				}),
+				clearQueue: () => this.clearQueue(),
 				shutdown: () => {
 					this._extensionShutdownHandler?.();
 				},

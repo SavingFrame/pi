@@ -378,6 +378,10 @@ export class ExtensionRunner {
 	private waitForIdleFn: () => Promise<void> = async () => {};
 	private abortFn: () => void = () => {};
 	private hasPendingMessagesFn: () => boolean = () => false;
+	private getQueuedMessagesFn: ExtensionContext["getQueuedMessages"] = () => ({ steering: [], followUp: [] });
+	private clearQueueFn: ExtensionContext["clearQueue"] = () => {
+		throw new Error("Queue actions are not bound");
+	};
 	private getContextUsageFn: () => ContextUsage | undefined = () => undefined;
 	private compactFn: (options?: CompactOptions) => void = () => {};
 	private getSystemPromptFn: () => string = () => "";
@@ -451,6 +455,8 @@ export class ExtensionRunner {
 		this.getSignalFn = contextActions.getSignal;
 		this.abortFn = contextActions.abort;
 		this.hasPendingMessagesFn = contextActions.hasPendingMessages;
+		this.getQueuedMessagesFn = contextActions.getQueuedMessages;
+		this.clearQueueFn = contextActions.clearQueue;
 		this.shutdownHandler = contextActions.shutdown;
 		this.getContextUsageFn = contextActions.getContextUsage;
 		this.compactFn = contextActions.compact;
@@ -941,6 +947,14 @@ export class ExtensionRunner {
 			hasPendingMessages: () => {
 				runner.assertActive();
 				return runner.hasPendingMessagesFn();
+			},
+			getQueuedMessages: () => {
+				runner.assertActive();
+				return runner.getQueuedMessagesFn();
+			},
+			clearQueue: () => {
+				runner.assertActive();
+				return runner.clearQueueFn();
 			},
 			shutdown: () => {
 				runner.assertActive();

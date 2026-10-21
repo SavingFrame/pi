@@ -1,6 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, InputEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, InputEvent, QueueUpdateEvent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.ts";
@@ -65,6 +65,93 @@ describe("AgentSession queue characterization", () => {
 			harnesses.pop()?.cleanup();
 		}
 	});
+
+	it("lets extensions inspect queue copies, clear pending messages, and explicitly requeue", async () => {
+		let context: ExtensionContext | undefined;
+		const updates: QueueUpdateEvent[] = [];
+		const { harness, waitForToolStart, promptPromise, releaseToolExecution } = await createWaitingHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.on("before_agent_start", (_event, ctx) => {
+						context = ctx;
+					});
+					pi.on("queue_update", (event) => {
+						updates.push(event);
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await waitForToolStart;
+		try {
+			expect(context).toBeDefined();
+			const ctx = context!;
+			await harness.session.steer("cancel steer", [{ type: "image", mimeType: "image/png", data: "AA==" }]);
+			await harness.session.followUp("cancel follow-up");
+			await harness.session.sendCustomMessage(
+				{ customType: "pending", content: "cancel custom", display: true },
+				{ deliverAs: "steer" },
+			);
+			const queued = ctx.getQueuedMessages();
+			expect(queued).toEqual({ steering: ["cancel steer"], followUp: ["cancel follow-up"] });
+			(queued.steering as string[]).push("not really queued");
+			expect(ctx.getQueuedMessages().steering).toEqual(["cancel steer"]);
+			expect(ctx.clearQueue()).toEqual({ steering: ["cancel steer"], followUp: ["cancel follow-up"] });
+			expect(ctx.getQueuedMessages()).toEqual({ steering: [], followUp: [] });
+			expect(harness.session.agent.peekQueuedMessages()).toEqual([]);
+			expect(updates.map(({ steering, followUp }) => ({ steering, followUp }))).toEqual([
+				{ steering: ["cancel steer"], followUp: [] },
+				{ steering: ["cancel steer"], followUp: ["cancel follow-up"] },
+				{ steering: [], followUp: [] },
+			]);
+			await harness.session.steer("replacement");
+		} finally {
+			releaseToolExecution();
+		}
+		await promptPromise;
+		expect(getUserTexts(harness)).toEqual(["start", "replacement"]);
+		expect(harness.session.messages.some((message) => message.role === "custom")).toBe(false);
+		expect(updates.at(-1)).toEqual({ type: "queue_update", steering: [], followUp: [] });
+		expect(context!.clearQueue()).toEqual({ steering: [], followUp: [] });
+		expect(getUserTexts(harness)).toEqual(["start", "replacement"]);
+	});
+
+	it.each(["steer", "followUp"] as const)(
+		"allows a queue_update handler to clear a newly enqueued %s",
+		async (mode) => {
+			let removed: string[] = [];
+			const { harness, waitForToolStart, promptPromise, releaseToolExecution } = await createWaitingHarness({
+				extensionFactories: [
+					(pi) => {
+						pi.on("queue_update", (event, ctx) => {
+							if (!event.steering.length && !event.followUp.length) return;
+							const cleared = ctx.clearQueue();
+							removed = [...cleared.steering, ...cleared.followUp];
+						});
+					},
+				],
+			});
+			harnesses.push(harness);
+			harness.setResponses([
+				fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }),
+				fauxAssistantMessage("done"),
+			]);
+			await waitForToolStart;
+			try {
+				await harness.session[mode]("cancel");
+				expect(removed).toEqual(["cancel"]);
+				expect(harness.session.agent.peekQueuedMessages()).toEqual([]);
+			} finally {
+				releaseToolExecution();
+			}
+			await promptPromise;
+			expect(getUserTexts(harness)).toEqual(["start"]);
+		},
+	);
 
 	it("dispatches extension commands immediately when prompted while idle", async () => {
 		const commandRuns: string[] = [];

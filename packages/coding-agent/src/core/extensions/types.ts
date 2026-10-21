@@ -354,6 +354,13 @@ export interface ExtensionContext {
 	abort(): void;
 	/** Whether there are queued messages waiting */
 	hasPendingMessages(): boolean;
+	/** Text-only copies of pending user steering and follow-up messages. Excludes TUI compaction input. */
+	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[] };
+	/**
+	 * Clear the session's steering and follow-up queues, including attachments and queued custom messages.
+	 * Returns user-message text only. Does not abort, undo delivery, or clear TUI compaction input or nextTurn messages.
+	 */
+	clearQueue(): { steering: string[]; followUp: string[] };
 	/** Gracefully shutdown pi and exit. Available in all contexts. */
 	shutdown(): void;
 	/** Get current context usage for the active model. */
@@ -956,6 +963,13 @@ export interface BeforeAgentStartCustomEvent extends BeforeAgentStartEventBase {
 /** Fired before a run starts from a user message or an idle custom message with `triggerTurn`. */
 export type BeforeAgentStartEvent = BeforeAgentStartUserEvent | BeforeAgentStartCustomEvent;
 
+/** Fired when pending user-message text is enqueued, delivered, or cleared. Return values are ignored. */
+export interface QueueUpdateEvent {
+	type: "queue_update";
+	steering: readonly string[];
+	followUp: readonly string[];
+}
+
 /** Fired when an agent loop starts */
 export interface AgentStartEvent {
 	type: "agent_start";
@@ -1415,6 +1429,7 @@ export type ExtensionEvent =
 	| AfterProviderResponseEvent
 	| ProviderStreamEvent
 	| BeforeAgentStartEvent
+	| QueueUpdateEvent
 	| AgentStartEvent
 	| AgentEndEvent
 	| AgentBeforeSettleEvent
@@ -1639,6 +1654,7 @@ export interface ExtensionAPI {
 		event: "before_agent_start",
 		handler: ExtensionHandler<BeforeAgentStartEvent, BeforeAgentStartEventResult>,
 	): () => void;
+	on(event: "queue_update", handler: ExtensionHandler<QueueUpdateEvent>): () => void;
 	on(event: "agent_start", handler: ExtensionHandler<AgentStartEvent>): () => void;
 	on(event: "agent_end", handler: ExtensionHandler<AgentEndEvent>): () => void;
 	on(
@@ -2216,6 +2232,8 @@ export interface ExtensionContextActions {
 	getSignal: () => AbortSignal | undefined;
 	abort: () => void;
 	hasPendingMessages: () => boolean;
+	getQueuedMessages: ExtensionContext["getQueuedMessages"];
+	clearQueue: ExtensionContext["clearQueue"];
 	shutdown: () => void;
 	getContextUsage: () => ContextUsage | undefined;
 	compact: (options?: CompactOptions) => void;

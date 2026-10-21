@@ -104,6 +104,8 @@ describe("ExtensionRunner", () => {
 		getSignal: () => undefined,
 		abort: () => {},
 		hasPendingMessages: () => false,
+		getQueuedMessages: () => ({ steering: [], followUp: [] }),
+		clearQueue: () => ({ steering: [], followUp: [] }),
 		shutdown: () => {},
 		getContextUsage: () => undefined,
 		compact: () => {},
@@ -536,6 +538,29 @@ describe("ExtensionRunner", () => {
 	});
 
 	describe("context creation", () => {
+		it("guards queue actions on event, command, and tool contexts after invalidation", () => {
+			const runner = new ExtensionRunner([], createExtensionRuntime(), tempDir, sessionManager, modelRegistry);
+			const getQueuedMessages = vi.fn(() => ({ steering: ["pending"], followUp: [] }));
+			const clearQueue = vi.fn(() => ({ steering: ["pending"], followUp: [] }));
+			runner.bindCore(extensionActions, { ...extensionContextActions, getQueuedMessages, clearQueue });
+			const contexts = [
+				runner.createContext(),
+				runner.createCommandContext(),
+				runner.createToolContext("tool", undefined),
+			];
+			for (const ctx of contexts) {
+				expect(ctx.getQueuedMessages()).toEqual({ steering: ["pending"], followUp: [] });
+				expect(ctx.clearQueue()).toEqual({ steering: ["pending"], followUp: [] });
+			}
+			runner.invalidate();
+			for (const ctx of contexts) {
+				expect(() => ctx.getQueuedMessages()).toThrow("stale");
+				expect(() => ctx.clearQueue()).toThrow("stale");
+			}
+			expect(getQueuedMessages).toHaveBeenCalledTimes(3);
+			expect(clearQueue).toHaveBeenCalledTimes(3);
+		});
+
 		it("exposes the current abort signal on ExtensionContext", async () => {
 			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
 			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir, sessionManager, modelRegistry);
